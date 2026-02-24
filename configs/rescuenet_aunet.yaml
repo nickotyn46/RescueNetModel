@@ -1,0 +1,66 @@
+DATA:
+  data_root: /kaggle/input/rescuenet
+  num_classes: 11
+
+  # Class names in label order (index = class id)
+  class_names:
+    - Background
+    - Water
+    - Building-No-Damage
+    - Building-Minor-Damage
+    - Building-Major-Damage
+    - Building-Total-Destruction
+    - Vehicle
+    - Road-Clear
+    - Road-Blocked
+    - Tree
+    - Pool
+
+  # Color encoding for visualization (RGB)
+  color_map:
+    - [0,   0,   0]    # 0 Background
+    - [61,  230, 250]  # 1 Water
+    - [180, 120, 120]  # 2 Building-No-Damage
+    - [235, 255, 7]    # 3 Building-Minor-Damage
+    - [255, 184, 6]    # 4 Building-Major-Damage
+    - [255, 0,   0]    # 5 Building-Total-Destruction
+    - [255, 0,   245]  # 6 Vehicle
+    - [140, 140, 140]  # 7 Road-Clear
+    - [160, 150, 20]   # 8 Road-Blocked
+    - [4,   250, 7]    # 9 Tree
+    - [255, 235, 0]    # 10 Pool
+
+TRAIN:
+  arch: aunet
+  train_h: 512
+  train_w: 512
+  scale_min: 0.5
+  scale_max: 2.0
+  rotate_min: -10
+  rotate_max: 10
+  ignore_label: 255
+
+  workers: 4
+  batch_size: 8
+  batch_size_val: 4
+
+  base_lr: 0.001
+  momentum: 0.9
+  weight_decay: 0.00001
+  epochs: 100
+  start_epoch: 0
+  power: 0.9
+
+  early_stopping_patience: 15
+
+  print_freq: 50
+  save_freq: 5
+  save_path: /kaggle/working/checkpoints
+
+  resume: ""
+
+TEST:
+  test_h: 512
+  test_w: 512
+  model_path: ""
+  save_folder: /kaggle/working/predictions
