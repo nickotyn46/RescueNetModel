@@ -41,8 +41,9 @@ TRAIN:
   ignore_label: 255
 
   workers: 4
-  batch_size: 8
-  batch_size_val: 4
+  batch_size: 4
+  batch_size_val: 2
+  use_amp: true
 
   base_lr: 0.001
   momentum: 0.9

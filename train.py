@@ -16,6 +16,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
+from torch.cuda.amp import GradScaler, autocast
 
 from data.dataset import RescueNetDataset, compute_class_weights
 from models.unet import AttU_Net
@@ -64,12 +65,13 @@ def load_checkpoint(path, model, optimizer=None):
 
 # ─── Training epoch ───────────────────────────────────────────────────────────
 
-def train_epoch(loader, model, criterion, optimizer, epoch, cfg, writer=None):
+def train_epoch(loader, model, criterion, optimizer, epoch, cfg, writer=None, scaler=None):
     num_classes = cfg['DATA']['num_classes']
     epochs      = cfg['TRAIN']['epochs']
     base_lr     = cfg['TRAIN']['base_lr']
     power       = cfg['TRAIN']['power']
     print_freq  = cfg['TRAIN']['print_freq']
+    use_amp     = cfg['TRAIN'].get('use_amp', False)
     max_iter    = epochs * len(loader)
 
     loss_meter   = AverageMeter()
@@ -84,12 +86,18 @@ def train_epoch(loader, model, criterion, optimizer, epoch, cfg, writer=None):
         images = images.cuda(non_blocking=True).float()
         masks  = masks.cuda(non_blocking=True).long()
 
-        outputs = model(images)
-        loss = criterion(outputs, masks)
-
         optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
+        with autocast(enabled=use_amp):
+            outputs = model(images)
+            loss = criterion(outputs, masks)
+
+        if use_amp and scaler is not None:
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
+        else:
+            loss.backward()
+            optimizer.step()
 
         # Update poly LR
         current_iter = epoch * len(loader) + i + 1
@@ -232,6 +240,11 @@ def main():
         weight_decay=train_cfg['weight_decay'],
     )
 
+    use_amp = train_cfg.get('use_amp', False)
+    scaler  = GradScaler() if use_amp else None
+    if use_amp:
+        print('Mixed precision (AMP) enabled.')
+
     # Resume
     start_epoch = train_cfg['start_epoch']
     best_miou   = 0.0
@@ -248,7 +261,7 @@ def main():
 
     for epoch in range(start_epoch, train_cfg['epochs']):
         train_loss, train_miou = train_epoch(
-            train_loader, model, criterion, optimizer, epoch, cfg, writer
+            train_loader, model, criterion, optimizer, epoch, cfg, writer, scaler
         )
 
         val_loss, val_miou = val_epoch(
