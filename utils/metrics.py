@@ -47,7 +47,7 @@ def intersectionAndUnion(output, target, num_classes, ignore_index=255):
     output = output.flatten().astype(np.int64)
     target = target.flatten().astype(np.int64)
 
-    valid = target != ignore_index
+    valid = (target != ignore_index) & (target < num_classes)
     output = output[valid]
     target = target[valid]
 
@@ -80,7 +80,7 @@ def intersectionAndUnionGPU(output, target, num_classes, ignore_index=255):
         output = output.flatten()
         target = target.flatten()
 
-    valid  = target != ignore_index
+    valid  = (target != ignore_index) & (target < num_classes)
     output = output[valid]
     target = target[valid]
 

@@ -120,7 +120,7 @@ def compute_class_weights(dataset, num_classes=11, c=1.02, max_samples=500):
         else:
             flat = np.array(masks).flatten()
 
-        valid = flat[flat != 255]
+        valid = flat[(flat != 255) & (flat < num_classes)]
         count = np.bincount(valid.astype(np.int64), minlength=num_classes)
         class_count += count
         total += valid.size
