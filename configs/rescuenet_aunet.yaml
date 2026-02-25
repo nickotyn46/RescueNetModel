@@ -40,7 +40,7 @@ TRAIN:
   rotate_max: 10
   ignore_label: 255
 
-  workers: 4
+  workers: 2
   batch_size: 4
   batch_size_val: 2
   use_amp: true

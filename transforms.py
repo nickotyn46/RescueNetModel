@@ -128,6 +128,9 @@ class ToTensorAndNormalize:
         img = TF.normalize(img, self.MEAN, self.STD)
 
         mask_np = np.array(mask, dtype=np.int64)
+        # Replace any value outside valid class range (0-10) that isn't
+        # already the ignore label (255) with 255 so CrossEntropyLoss skips it.
+        mask_np[(mask_np > 10) & (mask_np != 255)] = 255
         mask_t  = torch.from_numpy(mask_np)
         return img, mask_t
 
