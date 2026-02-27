@@ -54,7 +54,9 @@ def save_checkpoint(state, save_path, filename):
 def load_checkpoint(path, model, optimizer=None):
     print(f'=> Loading checkpoint: {path}')
     ckpt = torch.load(path, map_location='cpu')
-    model.load_state_dict(ckpt['state_dict'])
+    # Handle both plain model and DataParallel-wrapped model
+    raw = model.module if isinstance(model, nn.DataParallel) else model
+    raw.load_state_dict(ckpt['state_dict'])
     start_epoch = ckpt.get('epoch', 0)
     best_miou   = ckpt.get('best_miou', 0.0)
     if optimizer and 'optimizer' in ckpt:
@@ -228,6 +230,9 @@ def main():
     model = AttU_Net(img_ch=3, output_ch=data_cfg['num_classes']).cuda()
     total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f'Model: Attention U-Net | Trainable params: {total_params/1e6:.1f}M')
+    if torch.cuda.device_count() > 1:
+        print(f'DataParallel: {torch.cuda.device_count()} GPU kullanılıyor')
+        model = nn.DataParallel(model)
 
     criterion = nn.CrossEntropyLoss(
         weight=class_weights,
@@ -268,10 +273,14 @@ def main():
             val_loader, model, criterion, epoch, cfg, writer
         )
 
+        # Unwrap DataParallel for saving (ensures checkpoint is always loadable
+        # regardless of whether DataParallel is used at resume time)
+        raw_model = model.module if isinstance(model, nn.DataParallel) else model
+
         # Save latest checkpoint every save_freq epochs
         if (epoch + 1) % train_cfg['save_freq'] == 0:
             save_checkpoint(
-                {'epoch': epoch + 1, 'state_dict': model.state_dict(),
+                {'epoch': epoch + 1, 'state_dict': raw_model.state_dict(),
                  'optimizer': optimizer.state_dict(), 'best_miou': best_miou},
                 train_cfg['save_path'],
                 'latest.pth'
@@ -282,7 +291,7 @@ def main():
             best_miou  = val_miou
             no_improve = 0
             save_checkpoint(
-                {'epoch': epoch + 1, 'state_dict': model.state_dict(),
+                {'epoch': epoch + 1, 'state_dict': raw_model.state_dict(),
                  'optimizer': optimizer.state_dict(), 'best_miou': best_miou},
                 train_cfg['save_path'],
                 'best.pth'

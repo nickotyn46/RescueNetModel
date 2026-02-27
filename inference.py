@@ -9,6 +9,8 @@ Requirements on RPi:
 
 Usage:
     python inference.py --model rescuenet_aunet.hef [--save-output]
+
+Hardware target: Raspberry Pi 5 + Raspberry Pi AI HAT+ (26 TOPS / Hailo-8)
 """
 
 import argparse
@@ -42,8 +44,8 @@ except ImportError:
 # ─── Constants ────────────────────────────────────────────────────────────────
 
 NUM_CLASSES  = 11
-INPUT_HEIGHT = 512
-INPUT_WIDTH  = 512
+INPUT_HEIGHT = 713
+INPUT_WIDTH  = 713
 
 CLASS_NAMES = [
     'Background',
@@ -194,7 +196,7 @@ class ONNXInference:
 # ─── Main ─────────────────────────────────────────────────────────────────────
 
 def parse_args():
-    parser = argparse.ArgumentParser(description='RescueNet inference on RPi5 + Hailo-8L')
+    parser = argparse.ArgumentParser(description='RescueNet inference on RPi5 + Hailo-8 (26 TOPS)')
     parser.add_argument('--model', required=True,
                         help='Path to .hef file (Hailo) or .onnx file (fallback)')
     parser.add_argument('--source', default='camera',

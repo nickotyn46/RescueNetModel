@@ -32,17 +32,17 @@ DATA:
 
 TRAIN:
   arch: aunet
-  train_h: 512
-  train_w: 512
+  train_h: 713
+  train_w: 713
   scale_min: 0.5
   scale_max: 2.0
   rotate_min: -10
   rotate_max: 10
   ignore_label: 255
 
-  workers: 2
-  batch_size: 4
-  batch_size_val: 2
+  workers: 4
+  batch_size: 8
+  batch_size_val: 4
   use_amp: true
 
   base_lr: 0.001
@@ -52,16 +52,16 @@ TRAIN:
   start_epoch: 0
   power: 0.9
 
-  early_stopping_patience: 15
+  early_stopping_patience: 20
 
   print_freq: 50
-  save_freq: 5
+  save_freq: 1
   save_path: /kaggle/working/checkpoints
 
   resume: ""
 
 TEST:
-  test_h: 512
-  test_w: 512
+  test_h: 713
+  test_w: 713
   model_path: ""
   save_folder: /kaggle/working/predictions

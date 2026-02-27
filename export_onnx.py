@@ -1,13 +1,13 @@
 """
-Export trained Attention U-Net to ONNX format for Hailo-8L deployment.
+Export trained Attention U-Net to ONNX format for Hailo-8 deployment.
 
 IMPORTANT for Hailo:
   - Input shape must be FIXED (no dynamic axes)
   - opset_version=11 for maximum compatibility
   - After export, convert with Hailo Dataflow Compiler:
-      hailo parse --hw-arch hailo8l --ckpt model.onnx
-      hailo optimize --hw-arch hailo8l hailo_model.har
-      hailo compile --hw-arch hailo8l hailo_model.har --output-dir .
+      hailo parse --hw-arch hailo8 --ckpt model.onnx
+      hailo optimize --hw-arch hailo8 hailo_model.har
+      hailo compile --hw-arch hailo8 hailo_model.har --output-dir .
 
 Usage:
     python export_onnx.py --config configs/rescuenet_aunet.yaml \
@@ -35,8 +35,8 @@ def parse_args():
     parser.add_argument('--config',     default='configs/rescuenet_aunet.yaml')
     parser.add_argument('--model-path', required=True, help='Path to best.pth')
     parser.add_argument('--output',     default='rescuenet_aunet.onnx')
-    parser.add_argument('--input-size', type=int, default=512,
-                        help='Input image size (square, default 512)')
+    parser.add_argument('--input-size', type=int, default=713,
+                        help='Input image size (square, default 713)')
     return parser.parse_args()
 
 
@@ -87,11 +87,11 @@ def export(args, cfg):
     print(f'Max difference PyTorch vs ONNX: {max_diff:.6f}  (should be < 1e-4)')
 
     print(f'\nExport complete: {args.output}')
-    print('\nNext steps for Hailo-8L deployment:')
+    print('\nNext steps for Hailo-8 deployment (RPi AI HAT+ 26 TOPS):')
     print('  1. Install Hailo Dataflow Compiler (Ubuntu 22.04 / Docker)')
-    print('  2. hailo parse --hw-arch hailo8l --ckpt rescuenet_aunet.onnx')
-    print('  3. hailo optimize --hw-arch hailo8l hailo_model.har')
-    print('  4. hailo compile --hw-arch hailo8l hailo_model.har --output-dir .')
+    print('  2. hailo parse --hw-arch hailo8 --ckpt rescuenet_aunet.onnx')
+    print('  3. hailo optimize --hw-arch hailo8 hailo_model.har')
+    print('  4. hailo compile --hw-arch hailo8 hailo_model.har --output-dir .')
     print('  5. Copy rescuenet_aunet.hef to Raspberry Pi 5')
 
 
