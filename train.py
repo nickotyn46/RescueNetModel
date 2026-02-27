@@ -16,7 +16,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
-from torch.cuda.amp import GradScaler, autocast
+from torch.amp import GradScaler, autocast
 
 from data.dataset import RescueNetDataset, compute_class_weights
 from models.unet import AttU_Net
@@ -89,7 +89,7 @@ def train_epoch(loader, model, criterion, optimizer, epoch, cfg, writer=None, sc
         masks  = masks.cuda(non_blocking=True).long()
 
         optimizer.zero_grad()
-        with autocast(enabled=use_amp):
+        with autocast('cuda', enabled=use_amp):
             outputs = model(images)
             loss = criterion(outputs, masks)
 
@@ -246,7 +246,7 @@ def main():
     )
 
     use_amp = train_cfg.get('use_amp', False)
-    scaler  = GradScaler() if use_amp else None
+    scaler  = GradScaler('cuda') if use_amp else None
     if use_amp:
         print('Mixed precision (AMP) enabled.')
 

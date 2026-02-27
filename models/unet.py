@@ -8,6 +8,7 @@ Taken from the official RescueNet repository and adapted for 11-class output.
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from torch.nn import init
 
 
@@ -149,22 +150,28 @@ class AttU_Net(nn.Module):
         x5 = self.Conv5(x5)
 
         # Decoder
+        # F.interpolate aligns upsampled feature maps to skip connection size,
+        # allowing non-power-of-2 inputs (e.g. 713x713) without size mismatch.
         d5 = self.Up5(x5)
+        d5 = F.interpolate(d5, size=x4.shape[2:], mode='bilinear', align_corners=False)
         x4 = self.Att5(g=d5, x=x4)
         d5 = torch.cat((x4, d5), dim=1)
         d5 = self.Up_conv5(d5)
 
         d4 = self.Up4(d5)
+        d4 = F.interpolate(d4, size=x3.shape[2:], mode='bilinear', align_corners=False)
         x3 = self.Att4(g=d4, x=x3)
         d4 = torch.cat((x3, d4), dim=1)
         d4 = self.Up_conv4(d4)
 
         d3 = self.Up3(d4)
+        d3 = F.interpolate(d3, size=x2.shape[2:], mode='bilinear', align_corners=False)
         x2 = self.Att3(g=d3, x=x2)
         d3 = torch.cat((x2, d3), dim=1)
         d3 = self.Up_conv3(d3)
 
         d2 = self.Up2(d3)
+        d2 = F.interpolate(d2, size=x1.shape[2:], mode='bilinear', align_corners=False)
         x1 = self.Att2(g=d2, x=x1)
         d2 = torch.cat((x1, d2), dim=1)
         d2 = self.Up_conv2(d2)
