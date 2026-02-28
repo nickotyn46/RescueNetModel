@@ -48,11 +48,11 @@ TRAIN:
   base_lr: 0.001
   momentum: 0.9
   weight_decay: 0.00001
-  epochs: 100
+  epochs: 150
   start_epoch: 0
   power: 0.9
 
-  early_stopping_patience: 20
+  early_stopping_patience: 30
 
   print_freq: 50
   save_freq: 1

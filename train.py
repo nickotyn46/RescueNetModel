@@ -18,7 +18,7 @@ from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from torch.amp import GradScaler, autocast
 
-from data.dataset import RescueNetDataset, compute_class_weights
+from data.dataset import RescueNetDataset
 from models.unet import AttU_Net
 from transforms import get_train_transform, get_val_transform
 from utils.metrics import (
@@ -204,12 +204,6 @@ def main():
 
     print(f'Train: {len(train_ds)} samples | Val: {len(val_ds)} samples')
 
-    # Class weights to handle imbalance
-    print('Computing class weights (this may take a moment)...')
-    raw_weights = compute_class_weights(train_ds, num_classes=data_cfg['num_classes'])
-    class_weights = torch.from_numpy(raw_weights).float().cuda()
-    print('Class weights:', np.round(raw_weights, 3))
-
     train_loader = DataLoader(
         train_ds,
         batch_size=train_cfg['batch_size'],
@@ -235,7 +229,6 @@ def main():
         model = nn.DataParallel(model)
 
     criterion = nn.CrossEntropyLoss(
-        weight=class_weights,
         ignore_index=train_cfg['ignore_label']
     )
     optimizer = torch.optim.SGD(
