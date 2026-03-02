@@ -1,9 +1,10 @@
 """
-Evaluate a trained Attention U-Net checkpoint on the RescueNet test set.
+Evaluate a trained segmentation model (Attention U-Net or PSPNet) on
+the RescueNet test set.
 
 Usage:
-    python evaluate.py --config configs/rescuenet_aunet.yaml \
-                       --model-path /kaggle/working/checkpoints/best.pth \
+    python evaluate.py --config configs/rescuenet_pspnet101.yaml \
+                       --model-path /kaggle/working/checkpoints_pspnet/best.pth \
                        [--save-masks]
 """
 
@@ -38,8 +39,8 @@ def load_config(path):
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description='Evaluate Attention U-Net on RescueNet test set')
-    parser.add_argument('--config',     default='configs/rescuenet_aunet.yaml')
+    parser = argparse.ArgumentParser(description='Evaluate segmentation model on RescueNet test set')
+    parser.add_argument('--config',     default='configs/rescuenet_pspnet101.yaml')
     parser.add_argument('--model-path', required=True, help='Path to best.pth checkpoint')
     parser.add_argument('--save-masks', action='store_true',
                         help='Save color-coded prediction masks to disk')
@@ -60,6 +61,7 @@ def evaluate(args, cfg):
     test_cfg  = cfg['TEST']
     train_cfg = cfg['TRAIN']
     data_cfg  = cfg['DATA']
+    arch      = train_cfg.get('arch', 'aunet')
 
     num_classes = data_cfg['num_classes']
     class_names = data_cfg['class_names']
@@ -76,11 +78,32 @@ def evaluate(args, cfg):
     )
     print(f'Test set: {len(test_ds)} samples')
 
-    model = AttU_Net(img_ch=3, output_ch=num_classes).cuda()
+    if arch == 'aunet':
+        model = AttU_Net(img_ch=3, output_ch=num_classes).cuda()
+        model_desc = 'Attention U-Net'
+    elif arch in ('pspnet', 'pspnet_resnet101'):
+        try:
+            import segmentation_models_pytorch as smp
+        except ImportError as e:
+            raise ImportError(
+                "segmentation_models_pytorch is required for PSPNet evaluation. "
+                "Install it with `pip install segmentation-models-pytorch`."
+            ) from e
+
+        encoder_name = 'resnet101' if '101' in arch else 'resnet50'
+        model = smp.PSPNet(
+            encoder_name=encoder_name,
+            encoder_weights=None,
+            in_channels=3,
+            classes=num_classes,
+        ).cuda()
+        model_desc = f'PSPNet-{encoder_name}'
+    else:
+        raise ValueError(f"Unknown architecture '{arch}'. Supported: 'aunet', 'pspnet_resnet101'.")
     ckpt  = torch.load(args.model_path, map_location='cpu')
     model.load_state_dict(ckpt['state_dict'])
     model.eval()
-    print(f'Loaded checkpoint: {args.model_path}  (trained for {ckpt.get("epoch","?")} epochs)')
+    print(f'Loaded {model_desc} checkpoint: {args.model_path}  (trained for {ckpt.get("epoch","?")} epochs)')
 
     save_dir = test_cfg.get('save_folder', '/kaggle/working/predictions')
     if args.save_masks:

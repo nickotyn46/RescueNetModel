@@ -189,6 +189,7 @@ def main():
 
     train_cfg = cfg['TRAIN']
     data_cfg  = cfg['DATA']
+    arch      = train_cfg.get('arch', 'aunet')
 
     # Dataset
     train_ds = RescueNetDataset(
@@ -221,9 +222,31 @@ def main():
     )
 
     # Model
-    model = AttU_Net(img_ch=3, output_ch=data_cfg['num_classes']).cuda()
+    if arch == 'aunet':
+        model = AttU_Net(img_ch=3, output_ch=data_cfg['num_classes']).cuda()
+        model_desc = 'Attention U-Net'
+    elif arch in ('pspnet', 'pspnet_resnet101'):
+        try:
+            import segmentation_models_pytorch as smp
+        except ImportError as e:
+            raise ImportError(
+                "segmentation_models_pytorch is required for PSPNet. "
+                "Install it with `pip install segmentation-models-pytorch`."
+            ) from e
+
+        encoder_name = 'resnet101' if '101' in arch else 'resnet50'
+        model = smp.PSPNet(
+            encoder_name=encoder_name,
+            encoder_weights='imagenet',
+            in_channels=3,
+            classes=data_cfg['num_classes'],
+        ).cuda()
+        model_desc = f'PSPNet-{encoder_name}'
+    else:
+        raise ValueError(f"Unknown architecture '{arch}'. Supported: 'aunet', 'pspnet_resnet101'.")
+
     total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    print(f'Model: Attention U-Net | Trainable params: {total_params/1e6:.1f}M')
+    print(f'Model: {model_desc} | Trainable params: {total_params/1e6:.1f}M')
     if torch.cuda.device_count() > 1:
         print(f'DataParallel: {torch.cuda.device_count()} GPU kullanılıyor')
         model = nn.DataParallel(model)

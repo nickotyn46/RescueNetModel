@@ -1,5 +1,6 @@
 """
-Export trained Attention U-Net to ONNX format for Hailo-8 deployment.
+Export trained segmentation model (Attention U-Net or PSPNet) to ONNX format
+for Hailo-8 deployment.
 
 IMPORTANT for Hailo:
   - Input shape must be FIXED (no dynamic axes)
@@ -10,9 +11,9 @@ IMPORTANT for Hailo:
       hailo compile --hw-arch hailo8 hailo_model.har --output-dir .
 
 Usage:
-    python export_onnx.py --config configs/rescuenet_aunet.yaml \
-                          --model-path /kaggle/working/checkpoints/best.pth \
-                          --output rescuenet_aunet.onnx
+    python export_onnx.py --config configs/rescuenet_pspnet101.yaml \
+                          --model-path /kaggle/working/checkpoints_pspnet/best.pth \
+                          --output rescuenet_pspnet101.onnx
 """
 
 import argparse
@@ -32,7 +33,7 @@ def load_config(path):
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Export Attention U-Net to ONNX')
-    parser.add_argument('--config',     default='configs/rescuenet_aunet.yaml')
+    parser.add_argument('--config',     default='configs/rescuenet_pspnet101.yaml')
     parser.add_argument('--model-path', required=True, help='Path to best.pth')
     parser.add_argument('--output',     default='rescuenet_aunet.onnx')
     parser.add_argument('--input-size', type=int, default=713,
@@ -42,9 +43,33 @@ def parse_args():
 
 def export(args, cfg):
     num_classes = cfg['DATA']['num_classes']
+    train_cfg   = cfg.get('TRAIN', {})
+    arch        = train_cfg.get('arch', 'aunet')
     h = w = args.input_size
 
-    model = AttU_Net(img_ch=3, output_ch=num_classes)
+    if arch == 'aunet':
+        model = AttU_Net(img_ch=3, output_ch=num_classes)
+        model_desc = 'Attention U-Net'
+    elif arch in ('pspnet', 'pspnet_resnet101'):
+        try:
+            import segmentation_models_pytorch as smp
+        except ImportError as e:
+            raise ImportError(
+                "segmentation_models_pytorch is required for PSPNet export. "
+                "Install it with `pip install segmentation-models-pytorch`."
+            ) from e
+
+        encoder_name = 'resnet101' if '101' in arch else 'resnet50'
+        model = smp.PSPNet(
+            encoder_name=encoder_name,
+            encoder_weights=None,  # weights will be loaded from checkpoint
+            in_channels=3,
+            classes=num_classes,
+        )
+        model_desc = f'PSPNet-{encoder_name}'
+    else:
+        raise ValueError(f"Unknown architecture '{arch}' in config. Supported: 'aunet', 'pspnet_resnet101'.")
+
     ckpt  = torch.load(args.model_path, map_location='cpu')
     model.load_state_dict(ckpt['state_dict'])
     model.eval()
@@ -52,7 +77,7 @@ def export(args, cfg):
     # Fixed input — NO dynamic axes for Hailo compatibility
     dummy_input = torch.randn(1, 3, h, w)
 
-    print(f'Exporting to ONNX: {args.output}')
+    print(f'Exporting {model_desc} to ONNX: {args.output}')
     print(f'  Input shape : (1, 3, {h}, {w})')
     print(f'  Output shape: (1, {num_classes}, {h}, {w})')
     print(f'  ONNX opset  : 11')
