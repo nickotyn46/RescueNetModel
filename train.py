@@ -14,6 +14,7 @@ import time
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from torch.amp import GradScaler, autocast
@@ -183,6 +184,46 @@ def val_epoch(loader, model, criterion, epoch, cfg, writer=None):
 
 # ─── Main ─────────────────────────────────────────────────────────────────────
 
+class PSPNetSMPWrapper(nn.Module):
+    """
+    Wrap segmentation_models_pytorch.PSPNet to allow 713×713 inputs by
+    padding up to the next multiple of 8 and then cropping back.
+    """
+    def __init__(self, encoder_name: str, num_classes: int):
+        super().__init__()
+        try:
+            import segmentation_models_pytorch as smp
+        except ImportError as e:
+            raise ImportError(
+                "segmentation_models_pytorch is required for PSPNet. "
+                "Install it with `pip install segmentation-models-pytorch`."
+            ) from e
+
+        self.model = smp.PSPNet(
+            encoder_name=encoder_name,
+            encoder_weights='imagenet',
+            in_channels=3,
+            classes=num_classes,
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        b, c, h, w = x.shape
+        new_h = (h + 7) // 8 * 8
+        new_w = (w + 7) // 8 * 8
+
+        pad_bottom = new_h - h
+        pad_right = new_w - w
+
+        if pad_bottom > 0 or pad_right > 0:
+            x = F.pad(x, (0, pad_right, 0, pad_bottom))
+
+        y = self.model(x)
+
+        if pad_bottom > 0 or pad_right > 0:
+            y = y[..., :h, :w]
+        return y
+
+
 def main():
     args = parse_args()
     cfg  = load_config(args.config)
@@ -226,20 +267,10 @@ def main():
         model = AttU_Net(img_ch=3, output_ch=data_cfg['num_classes']).cuda()
         model_desc = 'Attention U-Net'
     elif arch in ('pspnet', 'pspnet_resnet101'):
-        try:
-            import segmentation_models_pytorch as smp
-        except ImportError as e:
-            raise ImportError(
-                "segmentation_models_pytorch is required for PSPNet. "
-                "Install it with `pip install segmentation-models-pytorch`."
-            ) from e
-
         encoder_name = 'resnet101' if '101' in arch else 'resnet50'
-        model = smp.PSPNet(
+        model = PSPNetSMPWrapper(
             encoder_name=encoder_name,
-            encoder_weights='imagenet',
-            in_channels=3,
-            classes=data_cfg['num_classes'],
+            num_classes=data_cfg['num_classes'],
         ).cuda()
         model_desc = f'PSPNet-{encoder_name}'
     else:
@@ -281,11 +312,11 @@ def main():
     print(f'Save path: {train_cfg["save_path"]}\n')
 
     for epoch in range(start_epoch, train_cfg['epochs']):
-        train_loss, train_miou = train_epoch(
+        _, _ = train_epoch(
             train_loader, model, criterion, optimizer, epoch, cfg, writer, scaler
         )
 
-        val_loss, val_miou = val_epoch(
+        _, val_miou = val_epoch(
             val_loader, model, criterion, epoch, cfg, writer
         )
 

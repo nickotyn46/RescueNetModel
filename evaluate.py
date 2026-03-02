@@ -13,6 +13,8 @@ import argparse
 import yaml
 import numpy as np
 import torch
+import torch.nn as nn
+import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from PIL import Image
 
@@ -91,12 +93,31 @@ def evaluate(args, cfg):
             ) from e
 
         encoder_name = 'resnet101' if '101' in arch else 'resnet50'
-        model = smp.PSPNet(
-            encoder_name=encoder_name,
-            encoder_weights=None,
-            in_channels=3,
-            classes=num_classes,
-        ).cuda()
+
+        class PSPNetSMPWrapper(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.model = smp.PSPNet(
+                    encoder_name=encoder_name,
+                    encoder_weights=None,
+                    in_channels=3,
+                    classes=num_classes,
+                )
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                b, c, h_in, w_in = x.shape
+                new_h = (h_in + 7) // 8 * 8
+                new_w = (w_in + 7) // 8 * 8
+                pad_bottom = new_h - h_in
+                pad_right = new_w - w_in
+                if pad_bottom > 0 or pad_right > 0:
+                    x = F.pad(x, (0, pad_right, 0, pad_bottom))
+                y = self.model(x)
+                if pad_bottom > 0 or pad_right > 0:
+                    y = y[..., :h_in, :w_in]
+                return y
+
+        model = PSPNetSMPWrapper().cuda()
         model_desc = f'PSPNet-{encoder_name}'
     else:
         raise ValueError(f"Unknown architecture '{arch}'. Supported: 'aunet', 'pspnet_resnet101'.")
