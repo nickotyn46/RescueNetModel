@@ -43,45 +43,45 @@ except ImportError:
 
 # ─── Constants ────────────────────────────────────────────────────────────────
 
+# 11-class (default) or 5-class (--5class: Others, Building-Light, Building-Heavy, Road-Clear, Road-Blocked)
+USE_5CLASS = False  # set by argparse when --5class
+
 NUM_CLASSES  = 11
 INPUT_HEIGHT = 713
 INPUT_WIDTH  = 713
 
-CLASS_NAMES = [
-    'Background',
-    'Water',
-    'Building-No-Damage',
-    'Building-Minor-Damage',
-    'Building-Major-Damage',
-    'Building-Total-Destruction',
-    'Vehicle',
-    'Road-Clear',
-    'Road-Blocked',
-    'Tree',
-    'Pool',
+CLASS_NAMES_11 = [
+    'Background', 'Water', 'Building-No-Damage', 'Building-Minor-Damage',
+    'Building-Major-Damage', 'Building-Total-Destruction', 'Vehicle',
+    'Road-Clear', 'Road-Blocked', 'Tree', 'Pool',
 ]
+CLASS_NAMES_5 = ['Others', 'Building-Light', 'Building-Heavy', 'Road-Clear', 'Road-Blocked']
 
-COLOR_MAP = np.array([
-    [0,   0,   0],    # 0 Background
-    [61,  230, 250],  # 1 Water
-    [180, 120, 120],  # 2 Building-No-Damage
-    [235, 255, 7],    # 3 Building-Minor-Damage
-    [255, 184, 6],    # 4 Building-Major-Damage
-    [255, 0,   0],    # 5 Building-Total-Destruction
-    [255, 0,   245],  # 6 Vehicle
-    [140, 140, 140],  # 7 Road-Clear
-    [160, 150, 20],   # 8 Road-Blocked
-    [4,   250, 7],    # 9 Tree
-    [255, 235, 0],    # 10 Pool
+COLOR_MAP_11 = np.array([
+    [0,   0,   0], [61,  230, 250], [180, 120, 120], [235, 255, 7],
+    [255, 184, 6], [255, 0,   0], [255, 0,   245], [140, 140, 140],
+    [160, 150, 20], [4,   250, 7], [255, 235, 0],
 ], dtype=np.uint8)
+COLOR_MAP_5 = np.array([
+    [0, 0, 0], [180, 180, 120], [255, 0, 0], [140, 140, 140], [160, 150, 20],
+], dtype=np.uint8)
+
+def _get_constants(use_5=False):
+    if use_5:
+        return 5, CLASS_NAMES_5, COLOR_MAP_5, {1, 2}, {3, 4}
+    return 11, CLASS_NAMES_11, COLOR_MAP_11, {2, 3, 4, 5}, {7, 8}
+
+def apply_model_mode(use_5class):
+    """Set globals for 5-class or 11-class model (call after parsing args)."""
+    global USE_5CLASS, NUM_CLASSES, CLASS_NAMES, COLOR_MAP, BUILDING_CLASSES, ROAD_CLASSES
+    USE_5CLASS = bool(use_5class)
+    NUM_CLASSES, CLASS_NAMES, COLOR_MAP, BUILDING_CLASSES, ROAD_CLASSES = _get_constants(USE_5CLASS)
+
+NUM_CLASSES, CLASS_NAMES, COLOR_MAP, BUILDING_CLASSES, ROAD_CLASSES = _get_constants(False)
 
 # ImageNet normalization
 MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32)
 STD  = np.array([0.229, 0.224, 0.225], dtype=np.float32)
-
-# Classes reported in final output
-BUILDING_CLASSES = {2, 3, 4, 5}
-ROAD_CLASSES     = {7, 8}
 
 
 # ─── Preprocessing / Postprocessing ──────────────────────────────────────────
@@ -120,12 +120,10 @@ def analyze_scene(pred):
         pct = counts.get(cls_id, 0) / total_pixels * 100
         building_report[CLASS_NAMES[cls_id]] = round(pct, 2)
 
-    # Road status
-    road_clear   = counts.get(7, 0) / total_pixels * 100
-    road_blocked = counts.get(8, 0) / total_pixels * 100
+    # Road status (works for 11-class 7,8 and 5-class 3,4)
     road_report = {
-        'Road-Clear':   round(road_clear, 2),
-        'Road-Blocked': round(road_blocked, 2),
+        CLASS_NAMES[cls_id]: round(counts.get(cls_id, 0) / total_pixels * 100, 2)
+        for cls_id in sorted(ROAD_CLASSES)
     }
 
     return building_report, road_report
@@ -197,6 +195,8 @@ class ONNXInference:
 
 def parse_args():
     parser = argparse.ArgumentParser(description='RescueNet inference on RPi5 + Hailo-8 (26 TOPS)')
+    parser.add_argument('--five-class', dest='use_5class', action='store_true',
+                        help='Use 5-class model (Others, Building-Light, Building-Heavy, Road-Clear, Road-Blocked)')
     parser.add_argument('--model', required=True,
                         help='Path to .hef file (Hailo) or .onnx file (fallback)')
     parser.add_argument('--source', default='camera',
@@ -210,6 +210,7 @@ def parse_args():
 
 def main():
     args = parse_args()
+    apply_model_mode(args.use_5class)
 
     # Load inference engine
     if args.model.endswith('.hef'):

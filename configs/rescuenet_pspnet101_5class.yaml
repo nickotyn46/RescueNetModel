@@ -1,0 +1,66 @@
+# RescueNet 5-class: Building-Light (no+minor), Building-Heavy (major+total), Road-Clear, Road-Blocked, Others
+# Focus: ağır hasar/yıkım + yol durumu. Labels remapped from 11-class in dataset.
+
+DATA:
+  data_root: /kaggle/input/rescuenet
+  num_classes: 5
+  use_reduced_5class: true   # use LABEL_MAP_11_TO_5 in dataset
+
+  # Loss ağırlıkları: Others düşük, bina ve yol yüksek (Building-Heavy en kritik)
+  # Sıra: [Others, Building-Light, Building-Heavy, Road-Clear, Road-Blocked]
+  class_weights: [0.5, 1.2, 1.5, 1.2, 1.2]
+
+  # Best model seçimi: sadece bu sınıfların mIoU'su (bina + yol). Others (0) sayılmaz.
+  important_class_ids: [1, 2, 3, 4]
+
+  # Loss sadece bina+yol piksellerinde (Others'a gradient yok — drone sadece bina/yol için)
+  loss_only_on_important: true
+
+  class_names:
+    - Others
+    - Building-Light
+    - Building-Heavy
+    - Road-Clear
+    - Road-Blocked
+
+  color_map:
+    - [0,   0,   0]    # 0 Others
+    - [180, 180, 120]  # 1 Building-Light (no+minor)
+    - [255, 0,   0]    # 2 Building-Heavy (major+total)
+    - [140, 140, 140]  # 3 Road-Clear
+    - [160, 150, 20]   # 4 Road-Blocked
+
+TRAIN:
+  arch: pspnet_resnet101
+  train_h: 713
+  train_w: 713
+  scale_min: 0.5
+  scale_max: 2.0
+  rotate_min: -10
+  rotate_max: 10
+  ignore_label: 255
+  workers: 4
+  batch_size: 4
+  batch_size_val: 2
+  use_amp: true
+  base_lr: 0.001
+  momentum: 0.9
+  weight_decay: 0.00001
+  epochs: 100
+  start_epoch: 0
+  power: 0.9
+  early_stopping_patience: 30
+  print_freq: 50
+  save_freq: 1
+  save_path: /kaggle/working/checkpoints_pspnet_5class
+  resume: ""
+
+  # CE + Dice loss: bina/yol IoU'yu genelde artırır (sınıf dengesizliğine iyi gelir)
+  use_dice_ce: true
+  dice_weight: 0.5
+
+TEST:
+  test_h: 713
+  test_w: 713
+  model_path: ""
+  save_folder: /kaggle/working/predictions_pspnet_5class

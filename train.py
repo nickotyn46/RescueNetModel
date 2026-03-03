@@ -19,13 +19,65 @@ from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from torch.amp import GradScaler, autocast
 
-from data.dataset import RescueNetDataset
+from data.dataset import RescueNetDataset, LABEL_MAP_11_TO_5
 from models.unet import AttU_Net
 from transforms import get_train_transform, get_val_transform
 from utils.metrics import (
     AverageMeter, poly_learning_rate,
     intersectionAndUnionGPU, compute_iou_per_class, print_iou_table
 )
+
+
+def soft_dice_loss(logits, target, num_classes, ignore_index=255, important_class_ids=None):
+    """Soft Dice (per class). important_class_ids: sadece bu sınıfların Dice'ı (bina+yol)."""
+    probs = F.softmax(logits, dim=1)
+    target_flat = target.long().clamp(0, num_classes - 1)
+    one_hot = F.one_hot(target_flat, num_classes).permute(0, 3, 1, 2).float()
+    valid = (target != ignore_index) & (target < num_classes)
+    valid = valid.unsqueeze(1).float()
+    probs = probs * valid
+    one_hot = one_hot * valid
+    inter = (probs * one_hot).sum(dim=(0, 2, 3))
+    card = probs.sum(dim=(0, 2, 3)) + one_hot.sum(dim=(0, 2, 3))
+    dice = (2.0 * inter + 1e-8) / (card + 1e-8)
+    if important_class_ids is not None:
+        dice = dice[torch.tensor(important_class_ids, device=dice.device)]
+    return 1.0 - dice.mean()
+
+
+class CriterionWithDice(nn.Module):
+    """CE + optional Dice. loss_only_on_important=True → gradient sadece bina+yol piksellerinde."""
+    def __init__(self, ce_weight=None, ignore_index=255, dice_weight=0.0, num_classes=5,
+                 important_class_ids=None):
+        super().__init__()
+        self.ce = nn.CrossEntropyLoss(weight=ce_weight, ignore_index=ignore_index)
+        self.dice_weight = dice_weight
+        self.num_classes = num_classes
+        self.ignore_index = ignore_index
+        self.important_class_ids = important_class_ids  # [1,2,3,4] = sadece bina+yol
+
+    def forward(self, logits, target):
+        if self.important_class_ids is not None:
+            # CE sadece bina+yol piksellerinde (Others'a gradient yok)
+            ce_per_pixel = F.cross_entropy(
+                logits, target, reduction='none',
+                weight=self.ce.weight, ignore_index=self.ignore_index
+            )
+            important_mask = torch.zeros_like(target, dtype=torch.bool)
+            for c in self.important_class_ids:
+                important_mask = important_mask | (target == c)
+            n = important_mask.sum().float().clamp(min=1.0)
+            loss_ce = (ce_per_pixel * important_mask.float()).sum() / n
+        else:
+            loss_ce = self.ce(logits, target)
+
+        if self.dice_weight <= 0:
+            return loss_ce
+        loss_dice = soft_dice_loss(
+            logits, target, self.num_classes, self.ignore_index,
+            important_class_ids=self.important_class_ids
+        )
+        return loss_ce + self.dice_weight * loss_dice
 
 
 # ─── Config ───────────────────────────────────────────────────────────────────
@@ -175,11 +227,18 @@ def val_epoch(loader, model, criterion, epoch, cfg, writer=None):
 
     print_iou_table(iou_cls, class_names, title=f'Val Epoch {epoch+1}/{epochs}')
 
+    important_class_ids = cfg['DATA'].get('important_class_ids')
+    if important_class_ids is not None:
+        important_miou = float(np.mean(iou_cls[np.array(important_class_ids)]))
+        print(f'  → Important mIoU (classes {important_class_ids}): {important_miou:.4f}')
+        if writer:
+            writer.add_scalar('mIoU_important/val', important_miou, epoch)
+
     if writer:
         writer.add_scalar('Loss/val', loss_meter.avg, epoch)
         writer.add_scalar('mIoU/val', miou, epoch)
 
-    return loss_meter.avg, miou
+    return loss_meter.avg, miou, iou_cls
 
 
 # ─── Main ─────────────────────────────────────────────────────────────────────
@@ -232,16 +291,19 @@ def main():
     data_cfg  = cfg['DATA']
     arch      = train_cfg.get('arch', 'aunet')
 
-    # Dataset
+    # Dataset (optional 5-class: building light/heavy, road clear/blocked, others)
+    label_mapping = LABEL_MAP_11_TO_5 if data_cfg.get('use_reduced_5class', False) else None
     train_ds = RescueNetDataset(
         root_dir=data_cfg['data_root'],
         mode='train',
         joint_transform=get_train_transform(train_cfg['train_h'], train_cfg['train_w']),
+        label_mapping=label_mapping,
     )
     val_ds = RescueNetDataset(
         root_dir=data_cfg['data_root'],
         mode='val',
         joint_transform=get_val_transform(train_cfg['train_h'], train_cfg['train_w']),
+        label_mapping=label_mapping,
     )
 
     print(f'Train: {len(train_ds)} samples | Val: {len(val_ds)} samples')
@@ -282,9 +344,34 @@ def main():
         print(f'DataParallel: {torch.cuda.device_count()} GPU kullanılıyor')
         model = nn.DataParallel(model)
 
-    criterion = nn.CrossEntropyLoss(
-        ignore_index=train_cfg['ignore_label']
-    )
+    # Loss: sadece bina+yol önemli → gradient da sadece orada (loss_only_on_important)
+    weight = None
+    if data_cfg.get('class_weights') is not None:
+        weight = torch.tensor(data_cfg['class_weights'], dtype=torch.float32).cuda()
+        assert weight.shape[0] == data_cfg['num_classes'], \
+            f"class_weights length must be num_classes ({data_cfg['num_classes']})"
+        print(f'Class weights: {data_cfg["class_weights"]}')
+    use_dice = train_cfg.get('use_dice_ce', False)
+    dice_weight = train_cfg.get('dice_weight', 0.5)
+    loss_only_important = data_cfg.get('loss_only_on_important', False)
+    important_ids = data_cfg.get('important_class_ids') if loss_only_important else None
+    if use_dice or loss_only_important:
+        criterion = CriterionWithDice(
+            ce_weight=weight,
+            ignore_index=train_cfg['ignore_label'],
+            dice_weight=dice_weight if use_dice else 0.0,
+            num_classes=data_cfg['num_classes'],
+            important_class_ids=important_ids,
+        )
+        if loss_only_important:
+            print('Loss: sadece bina+yol piksellerinde (Others yok)')
+        if use_dice:
+            print(f'Loss: CE + Dice (dice_weight={dice_weight})')
+    else:
+        criterion = nn.CrossEntropyLoss(
+            ignore_index=train_cfg['ignore_label'],
+            weight=weight,
+        )
     optimizer = torch.optim.SGD(
         model.parameters(),
         lr=train_cfg['base_lr'],
@@ -316,9 +403,18 @@ def main():
             train_loader, model, criterion, optimizer, epoch, cfg, writer, scaler
         )
 
-        _, val_miou = val_epoch(
+        _, val_miou, iou_cls = val_epoch(
             val_loader, model, criterion, epoch, cfg, writer
         )
+
+        # Best model: by important mIoU (sadece bina+yol) veya full mIoU
+        important_ids = data_cfg.get('important_class_ids')
+        if important_ids is not None:
+            best_metric = float(np.mean(iou_cls[np.array(important_ids)]))
+            metric_name = 'important mIoU'
+        else:
+            best_metric = val_miou
+            metric_name = 'mIoU'
 
         # Unwrap DataParallel for saving (ensures checkpoint is always loadable
         # regardless of whether DataParallel is used at resume time)
@@ -333,9 +429,9 @@ def main():
                 'latest.pth'
             )
 
-        # Save best checkpoint
-        if val_miou > best_miou:
-            best_miou  = val_miou
+        # Save best checkpoint (by important mIoU when configured)
+        if best_metric > best_miou:
+            best_miou  = best_metric
             no_improve = 0
             save_checkpoint(
                 {'epoch': epoch + 1, 'state_dict': raw_model.state_dict(),
@@ -343,7 +439,7 @@ def main():
                 train_cfg['save_path'],
                 'best.pth'
             )
-            print(f'★ New best mIoU: {best_miou:.4f} — checkpoint saved.')
+            print(f'★ New best {metric_name}: {best_miou:.4f} — checkpoint saved.')
         else:
             no_improve += 1
             print(f'No improvement for {no_improve}/{patience} epochs.')
@@ -353,7 +449,8 @@ def main():
             break
 
     writer.close()
-    print(f'\nTraining complete. Best val mIoU: {best_miou:.4f}')
+    metric_name = 'important mIoU (bina+yol)' if data_cfg.get('important_class_ids') else 'mIoU'
+    print(f'\nTraining complete. Best val {metric_name}: {best_miou:.4f}')
     print(f'Best model saved at: {os.path.join(train_cfg["save_path"], "best.pth")}')
 
 

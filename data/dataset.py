@@ -4,6 +4,10 @@ Classes: {Background:0, Water:1, Building_No_Damage:2, Building_Minor_Damage:3,
           Building_Major_Damage:4, Building_Total_Destruction:5, Vehicle:6,
           Road-Clear:7, Road-Blocked:8, Tree:9, Pool:10}
 
+Optional 5-class reduced setup (label_mapping):
+  Others:0, Building-Light:1, Building-Heavy:2, Road-Clear:3, Road-Blocked:4
+  Mapping: 0,1,6,9,10→0; 2,3→1; 4,5→2; 7→3; 8→4; 255→255.
+
 Kaggle dataset folder structure (yaroslavchyrko/rescuenet):
   <root>/train/train-org-img/   -> .jpg images
   <root>/train/train-label-img/ -> .png masks (filename contains 'lab')
@@ -12,6 +16,12 @@ Kaggle dataset folder structure (yaroslavchyrko/rescuenet):
   <root>/test/test-org-img/
   <root>/test/test-label-img/
 """
+
+# 11 → 5 class mapping: [new_id for old_id in 0..10]
+# Others:0, Building-Light:1, Building-Heavy:2, Road-Clear:3, Road-Blocked:4
+LABEL_MAP_11_TO_5 = [0, 0, 1, 1, 2, 2, 0, 3, 4, 0, 0]  # index = original class 0..10
+REDUCED_NUM_CLASSES = 5
+REDUCED_CLASS_NAMES = ['Others', 'Building-Light', 'Building-Heavy', 'Road-Clear', 'Road-Blocked']
 
 import os
 from PIL import Image
@@ -57,13 +67,21 @@ class RescueNetDataset(data.Dataset):
     def __init__(self, root_dir, mode='train',
                  joint_transform=None,
                  image_transform=None,
-                 mask_transform=None):
+                 mask_transform=None,
+                 label_mapping=None):
+        """
+        label_mapping: optional list of length 11; mapping[old_id] = new_id for original classes 0..10.
+                       If provided, mask pixels are remapped (255 stays 255). Use LABEL_MAP_11_TO_5 for 5-class.
+        """
         assert mode in self.FOLDER_MAP, f"mode must be one of {list(self.FOLDER_MAP)}"
         self.root_dir = root_dir
         self.mode = mode
         self.joint_transform = joint_transform
         self.image_transform = image_transform
         self.mask_transform = mask_transform
+        self.label_mapping = label_mapping  # list of 11 elements, or None
+        if label_mapping is not None:
+            assert len(label_mapping) == 11, "label_mapping must have 11 elements (for original classes 0..10)"
 
         img_folder, lbl_folder = self.FOLDER_MAP[mode]
         self.images = _get_files(
@@ -86,6 +104,13 @@ class RescueNetDataset(data.Dataset):
     def __getitem__(self, index):
         img = Image.open(self.images[index]).convert('RGB')
         mask = Image.open(self.labels[index])
+
+        if self.label_mapping is not None:
+            arr = np.array(mask, dtype=np.int64)
+            out = np.full_like(arr, 255)
+            valid = (arr >= 0) & (arr <= 10)
+            out[valid] = np.array(self.label_mapping, dtype=np.int64)[arr[valid]]
+            mask = Image.fromarray(out.astype(np.uint8))
 
         if self.joint_transform is not None:
             img, mask = self.joint_transform(img, mask)

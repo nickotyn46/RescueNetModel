@@ -18,14 +18,14 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from PIL import Image
 
-from data.dataset import RescueNetDataset
+from data.dataset import RescueNetDataset, LABEL_MAP_11_TO_5
 from models.unet import AttU_Net
 from transforms import get_val_transform
 from utils.metrics import intersectionAndUnionGPU, compute_iou_per_class, print_iou_table
 
 
-# Classes of interest for the Teknofest project
-INTEREST_CLASSES = {
+# Classes of interest (11-class setup)
+INTEREST_CLASSES_11 = {
     2: 'Building-No-Damage',
     3: 'Building-Minor-Damage',
     4: 'Building-Major-Damage',
@@ -33,6 +33,8 @@ INTEREST_CLASSES = {
     7: 'Road-Clear',
     8: 'Road-Blocked',
 }
+# 5-class: Building-Light, Building-Heavy, Road-Clear, Road-Blocked
+INTEREST_CLASSES_5 = {1: 'Building-Light', 2: 'Building-Heavy', 3: 'Road-Clear', 4: 'Road-Blocked'}
 
 
 def load_config(path):
@@ -69,10 +71,12 @@ def evaluate(args, cfg):
     class_names = data_cfg['class_names']
     color_map   = data_cfg['color_map']
 
+    label_mapping = LABEL_MAP_11_TO_5 if data_cfg.get('use_reduced_5class', False) else None
     test_ds = RescueNetDataset(
         root_dir=data_cfg['data_root'],
         mode='test',
         joint_transform=get_val_transform(test_cfg['test_h'], test_cfg['test_w']),
+        label_mapping=label_mapping,
     )
     test_loader = DataLoader(
         test_ds, batch_size=1, shuffle=False,
@@ -161,10 +165,12 @@ def evaluate(args, cfg):
     mean_iou      = print_iou_table(iou_per_class, class_names, title='Test Set Results')
 
     # Highlight the classes that matter for Teknofest
+    interest = INTEREST_CLASSES_5 if num_classes == 5 else INTEREST_CLASSES_11
     print('\n── Classes of Interest (Teknofest) ──')
-    for cls_id, cls_name in INTEREST_CLASSES.items():
-        iou = iou_per_class[cls_id]
-        print(f'  {cls_name:<35} IoU: {iou:.4f}  ({iou*100:.2f}%)')
+    for cls_id, cls_name in interest.items():
+        if cls_id < len(iou_per_class):
+            iou = iou_per_class[cls_id]
+            print(f'  {cls_name:<35} IoU: {iou:.4f}  ({iou*100:.2f}%)')
 
     return mean_iou, iou_per_class
 
