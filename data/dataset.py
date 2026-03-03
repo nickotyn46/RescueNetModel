@@ -8,6 +8,10 @@ Optional 5-class reduced setup (label_mapping):
   Others:0, Building-Light:1, Building-Heavy:2, Road-Clear:3, Road-Blocked:4
   Mapping: 0,1,6,9,10→0; 2,3→1; 4,5→2; 7→3; 8→4; 255→255.
 
+Optional 3-class building-only (label_mapping):
+  Others:0, Building-Light:1, Building-Heavy:2
+  Mapping: 0,1,6,7,8,9,10→0; 2,3→1; 4,5→2; 255→255.
+
 Kaggle dataset folder structure (yaroslavchyrko/rescuenet):
   <root>/train/train-org-img/   -> .jpg images
   <root>/train/train-label-img/ -> .png masks (filename contains 'lab')
@@ -22,6 +26,11 @@ Kaggle dataset folder structure (yaroslavchyrko/rescuenet):
 LABEL_MAP_11_TO_5 = [0, 0, 1, 1, 2, 2, 0, 3, 4, 0, 0]  # index = original class 0..10
 REDUCED_NUM_CLASSES = 5
 REDUCED_CLASS_NAMES = ['Others', 'Building-Light', 'Building-Heavy', 'Road-Clear', 'Road-Blocked']
+
+# 11 → 3 class mapping (sadece bina: Others, Building-Light, Building-Heavy)
+# Yol/su/araç/vb. hepsi Others
+LABEL_MAP_11_TO_3 = [0, 0, 1, 1, 2, 2, 0, 0, 0, 0, 0]  # 0..10 → 0,1,2
+REDUCED_3_CLASS_NAMES = ['Others', 'Building-Light', 'Building-Heavy']
 
 import os
 from PIL import Image

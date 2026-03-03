@@ -56,6 +56,7 @@ CLASS_NAMES_11 = [
     'Road-Clear', 'Road-Blocked', 'Tree', 'Pool',
 ]
 CLASS_NAMES_5 = ['Others', 'Building-Light', 'Building-Heavy', 'Road-Clear', 'Road-Blocked']
+CLASS_NAMES_3 = ['Others', 'Building-Light', 'Building-Heavy']
 
 COLOR_MAP_11 = np.array([
     [0,   0,   0], [61,  230, 250], [180, 120, 120], [235, 255, 7],
@@ -65,19 +66,24 @@ COLOR_MAP_11 = np.array([
 COLOR_MAP_5 = np.array([
     [0, 0, 0], [180, 180, 120], [255, 0, 0], [140, 140, 140], [160, 150, 20],
 ], dtype=np.uint8)
+COLOR_MAP_3 = np.array([
+    [0, 0, 0], [180, 180, 120], [255, 0, 0],
+], dtype=np.uint8)
 
-def _get_constants(use_5=False):
+def _get_constants(use_5=False, use_3=False):
+    if use_3:
+        return 3, CLASS_NAMES_3, COLOR_MAP_3, {1, 2}, set()
     if use_5:
         return 5, CLASS_NAMES_5, COLOR_MAP_5, {1, 2}, {3, 4}
     return 11, CLASS_NAMES_11, COLOR_MAP_11, {2, 3, 4, 5}, {7, 8}
 
-def apply_model_mode(use_5class):
-    """Set globals for 5-class or 11-class model (call after parsing args)."""
+def apply_model_mode(use_5class=False, use_3class=False):
+    """Set globals for 3/5/11-class model (call after parsing args)."""
     global USE_5CLASS, NUM_CLASSES, CLASS_NAMES, COLOR_MAP, BUILDING_CLASSES, ROAD_CLASSES
     USE_5CLASS = bool(use_5class)
-    NUM_CLASSES, CLASS_NAMES, COLOR_MAP, BUILDING_CLASSES, ROAD_CLASSES = _get_constants(USE_5CLASS)
+    NUM_CLASSES, CLASS_NAMES, COLOR_MAP, BUILDING_CLASSES, ROAD_CLASSES = _get_constants(USE_5CLASS, use_3class)
 
-NUM_CLASSES, CLASS_NAMES, COLOR_MAP, BUILDING_CLASSES, ROAD_CLASSES = _get_constants(False)
+NUM_CLASSES, CLASS_NAMES, COLOR_MAP, BUILDING_CLASSES, ROAD_CLASSES = _get_constants(False, False)
 
 # ImageNet normalization
 MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32)
@@ -135,10 +141,11 @@ def print_report(building, road, fps):
     for name, pct in building.items():
         bar = '█' * int(pct / 2)
         print(f'    {name:<30} {pct:>5.1f}%  {bar}')
-    print('  Roads:')
-    for name, pct in road.items():
-        bar = '█' * int(pct / 2)
-        print(f'    {name:<30} {pct:>5.1f}%  {bar}')
+    if road:
+        print('  Roads:')
+        for name, pct in road.items():
+            bar = '█' * int(pct / 2)
+            print(f'    {name:<30} {pct:>5.1f}%  {bar}')
 
 
 # ─── Hailo inference ──────────────────────────────────────────────────────────
@@ -195,6 +202,8 @@ class ONNXInference:
 
 def parse_args():
     parser = argparse.ArgumentParser(description='RescueNet inference on RPi5 + Hailo-8 (26 TOPS)')
+    parser.add_argument('--three-class', dest='use_3class', action='store_true',
+                        help='Use 3-class model (Others, Building-Light, Building-Heavy only)')
     parser.add_argument('--five-class', dest='use_5class', action='store_true',
                         help='Use 5-class model (Others, Building-Light, Building-Heavy, Road-Clear, Road-Blocked)')
     parser.add_argument('--model', required=True,
@@ -210,7 +219,7 @@ def parse_args():
 
 def main():
     args = parse_args()
-    apply_model_mode(args.use_5class)
+    apply_model_mode(args.use_5class, getattr(args, 'use_3class', False))
 
     # Load inference engine
     if args.model.endswith('.hef'):

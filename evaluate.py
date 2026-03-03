@@ -18,7 +18,7 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from PIL import Image
 
-from data.dataset import RescueNetDataset, LABEL_MAP_11_TO_5
+from data.dataset import RescueNetDataset, LABEL_MAP_11_TO_5, LABEL_MAP_11_TO_3
 from models.unet import AttU_Net
 from transforms import get_val_transform
 from utils.metrics import intersectionAndUnionGPU, compute_iou_per_class, print_iou_table
@@ -35,6 +35,8 @@ INTEREST_CLASSES_11 = {
 }
 # 5-class: Building-Light, Building-Heavy, Road-Clear, Road-Blocked
 INTEREST_CLASSES_5 = {1: 'Building-Light', 2: 'Building-Heavy', 3: 'Road-Clear', 4: 'Road-Blocked'}
+# 3-class: sadece bina
+INTEREST_CLASSES_3 = {1: 'Building-Light', 2: 'Building-Heavy'}
 
 
 def load_config(path):
@@ -71,7 +73,12 @@ def evaluate(args, cfg):
     class_names = data_cfg['class_names']
     color_map   = data_cfg['color_map']
 
-    label_mapping = LABEL_MAP_11_TO_5 if data_cfg.get('use_reduced_5class', False) else None
+    if data_cfg.get('use_reduced_3class', False):
+        label_mapping = LABEL_MAP_11_TO_3
+    elif data_cfg.get('use_reduced_5class', False):
+        label_mapping = LABEL_MAP_11_TO_5
+    else:
+        label_mapping = None
     test_ds = RescueNetDataset(
         root_dir=data_cfg['data_root'],
         mode='test',
@@ -165,7 +172,12 @@ def evaluate(args, cfg):
     mean_iou      = print_iou_table(iou_per_class, class_names, title='Test Set Results')
 
     # Highlight the classes that matter for Teknofest
-    interest = INTEREST_CLASSES_5 if num_classes == 5 else INTEREST_CLASSES_11
+    if num_classes == 3:
+        interest = INTEREST_CLASSES_3
+    elif num_classes == 5:
+        interest = INTEREST_CLASSES_5
+    else:
+        interest = INTEREST_CLASSES_11
     print('\n── Classes of Interest (Teknofest) ──')
     for cls_id, cls_name in interest.items():
         if cls_id < len(iou_per_class):

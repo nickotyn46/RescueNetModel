@@ -19,7 +19,7 @@ from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from torch.amp import GradScaler, autocast
 
-from data.dataset import RescueNetDataset, LABEL_MAP_11_TO_5
+from data.dataset import RescueNetDataset, LABEL_MAP_11_TO_5, LABEL_MAP_11_TO_3
 from models.unet import AttU_Net
 from transforms import get_train_transform, get_val_transform
 from utils.metrics import (
@@ -291,8 +291,13 @@ def main():
     data_cfg  = cfg['DATA']
     arch      = train_cfg.get('arch', 'aunet')
 
-    # Dataset (optional 5-class: building light/heavy, road clear/blocked, others)
-    label_mapping = LABEL_MAP_11_TO_5 if data_cfg.get('use_reduced_5class', False) else None
+    # Dataset (3-class: sadece bina | 5-class: bina+yol | 11-class)
+    if data_cfg.get('use_reduced_3class', False):
+        label_mapping = LABEL_MAP_11_TO_3
+    elif data_cfg.get('use_reduced_5class', False):
+        label_mapping = LABEL_MAP_11_TO_5
+    else:
+        label_mapping = None
     train_ds = RescueNetDataset(
         root_dir=data_cfg['data_root'],
         mode='train',

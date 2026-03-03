@@ -46,18 +46,18 @@ TRAIN:
   base_lr: 0.001
   momentum: 0.9
   weight_decay: 0.00001
-  epochs: 100
+  epochs: 120
   start_epoch: 0
   power: 0.9
-  early_stopping_patience: 30
+  early_stopping_patience: 40
   print_freq: 50
   save_freq: 1
   save_path: /kaggle/working/checkpoints_pspnet_5class
   resume: ""
 
-  # CE + Dice loss: bina/yol IoU'yu genelde artırır (sınıf dengesizliğine iyi gelir)
+  # CE + Dice: 0.70+ hedefi için dice ağırlığı biraz yüksek (IoU'ya iyi gelir)
   use_dice_ce: true
-  dice_weight: 0.5
+  dice_weight: 0.6
 
 TEST:
   test_h: 713
