@@ -32,20 +32,23 @@ from utils.metrics import (
 
 
 def soft_dice_loss(logits, target, num_classes, ignore_index=255, important_class_ids=None):
-    """Soft Dice (per class). important_class_ids: sadece bu sınıfların Dice'ı (bina+yol)."""
+    """Soft Dice (per class). important_class_ids: sadece bu sınıfların Dice'ı (bina+yol).
+    AMP/FP16 uyumu için eps=1e-6 ve clamp ile sayısal kararlılık."""
     probs = F.softmax(logits, dim=1)
     target_flat = target.long().clamp(0, num_classes - 1)
     one_hot = F.one_hot(target_flat, num_classes).permute(0, 3, 1, 2).float()
     valid = (target != ignore_index) & (target < num_classes)
     valid = valid.unsqueeze(1).float()
-    probs = probs * valid
+    probs = (probs * valid).clamp(1e-7, 1.0 - 1e-7)  # FP16 underflow/overflow önleme
     one_hot = one_hot * valid
     inter = (probs * one_hot).sum(dim=(0, 2, 3))
     card = probs.sum(dim=(0, 2, 3)) + one_hot.sum(dim=(0, 2, 3))
-    dice = (2.0 * inter + 1e-8) / (card + 1e-8)
+    eps = 1e-6  # FP16'da 1e-8 underflow yapabilir
+    dice = (2.0 * inter + eps) / (card + eps)
     if important_class_ids is not None:
         dice = dice[torch.tensor(important_class_ids, device=dice.device)]
-    return 1.0 - dice.mean()
+    loss = 1.0 - dice.mean()
+    return loss.clamp(0.0, 2.0)  # NaN/Inf taşmasını önle
 
 
 class CriterionWithDice(nn.Module):
@@ -149,12 +152,20 @@ def train_epoch(loader, model, criterion, optimizer, epoch, cfg, writer=None, sc
             outputs = model(images)
             loss = criterion(outputs, masks)
 
+        # NaN ise güncelleme yapma (model bozulmasın)
+        if not torch.isfinite(loss).all():
+            continue
         if use_amp and scaler is not None:
             scaler.scale(loss).backward()
+            max_norm = cfg['TRAIN'].get('max_grad_norm', 1.0)
+            scaler.unscale_(optimizer)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
             scaler.step(optimizer)
             scaler.update()
         else:
             loss.backward()
+            max_norm = cfg['TRAIN'].get('max_grad_norm', 1.0)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
             optimizer.step()
 
         # Update poly LR (skip when using scheduler, e.g. crop pipeline)
@@ -176,7 +187,8 @@ def train_epoch(loader, model, criterion, optimizer, epoch, cfg, writer=None, sc
         inter_meter.update(inter)
         union_meter.update(union)
         target_meter.update(target)
-        loss_meter.update(loss.item(), images.size(0))
+        if torch.isfinite(loss):
+            loss_meter.update(loss.item(), images.size(0))
 
         if (i + 1) % print_freq == 0:
             iou_cls  = inter_meter.sum / (union_meter.sum + 1e-10)

@@ -27,8 +27,9 @@ TRAIN:
   workers: 4
   batch_size: 2
   batch_size_val: 1
-  use_amp: true
-  base_lr: 0.0001        # 5e-5 if unstable
+  use_amp: true          # false = NaN olursa kapat (FP32 daha kararlı)
+  base_lr: 0.0001        # 5e-5 NaN olursa düşür
+  max_grad_norm: 1.0     # gradient clipping (NaN önleme)
   momentum: 0.9
   weight_decay: 0.00001
   epochs: 50
