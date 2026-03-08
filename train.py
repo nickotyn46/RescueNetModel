@@ -21,7 +21,10 @@ from torch.amp import GradScaler, autocast
 
 from data.dataset import RescueNetDataset, LABEL_MAP_11_TO_5, LABEL_MAP_11_TO_3
 from models.unet import AttU_Net
-from transforms import get_train_transform, get_val_transform
+from transforms import (
+    get_train_transform, get_val_transform,
+    get_train_transform_crop, get_val_transform_crop,
+)
 from utils.metrics import (
     AverageMeter, poly_learning_rate,
     intersectionAndUnionGPU, compute_iou_per_class, print_iou_table
@@ -154,11 +157,14 @@ def train_epoch(loader, model, criterion, optimizer, epoch, cfg, writer=None, sc
             loss.backward()
             optimizer.step()
 
-        # Update poly LR
-        current_iter = epoch * len(loader) + i + 1
-        lr = poly_learning_rate(base_lr, current_iter, max_iter, power)
-        for pg in optimizer.param_groups:
-            pg['lr'] = lr
+        # Update poly LR (skip when using scheduler, e.g. crop pipeline)
+        if not cfg['TRAIN'].get('scheduler'):
+            current_iter = epoch * len(loader) + i + 1
+            lr = poly_learning_rate(base_lr, current_iter, max_iter, power)
+            for pg in optimizer.param_groups:
+                pg['lr'] = lr
+        else:
+            lr = optimizer.param_groups[0]['lr']
 
         # Metrics
         preds = outputs.detach().max(1)[1]
@@ -233,6 +239,11 @@ def val_epoch(loader, model, criterion, epoch, cfg, writer=None):
         print(f'  → Important mIoU (classes {important_class_ids}): {important_miou:.4f}')
         if writer:
             writer.add_scalar('mIoU_important/val', important_miou, epoch)
+    if num_classes >= 3:
+        building_heavy_iou = float(iou_cls[2])
+        print(f'  → Building-heavy IoU (class 2): {building_heavy_iou:.4f}')
+        if writer:
+            writer.add_scalar('IoU_building_heavy/val', building_heavy_iou, epoch)
 
     if writer:
         writer.add_scalar('Loss/val', loss_meter.avg, epoch)
@@ -298,17 +309,45 @@ def main():
         label_mapping = LABEL_MAP_11_TO_5
     else:
         label_mapping = None
+
+    # Opsiyonel: sadece bina etiketi olan görüntüler (önceden scripts/build_building_list.py ile üretilmiş listeler)
+    building_dir = data_cfg.get('building_only_list_dir') or train_cfg.get('building_only_list_dir')
+    train_list = os.path.join(building_dir, 'train.txt') if building_dir else None
+    val_list = os.path.join(building_dir, 'val.txt') if building_dir else None
+    if building_dir:
+        if os.path.isfile(train_list):
+            print(f'Building-only: train listesi {train_list}')
+        else:
+            train_list = None
+        if not os.path.isfile(val_list):
+            val_list = None
+
+    crop_size = train_cfg.get('train_crop_size')
+    if crop_size is not None:
+        joint_train = get_train_transform_crop(
+            crop_size,
+            prob_heavy=train_cfg.get('crop_prob_heavy', 0.5),
+            prob_light=train_cfg.get('crop_prob_light', 0.3),
+        )
+        joint_val = get_val_transform_crop(crop_size)
+        print(f'Crop pipeline: size={crop_size} (no full resize)')
+    else:
+        joint_train = get_train_transform(train_cfg['train_h'], train_cfg['train_w'])
+        joint_val = get_val_transform(train_cfg['train_h'], train_cfg['train_w'])
+
     train_ds = RescueNetDataset(
         root_dir=data_cfg['data_root'],
         mode='train',
-        joint_transform=get_train_transform(train_cfg['train_h'], train_cfg['train_w']),
+        joint_transform=joint_train,
         label_mapping=label_mapping,
+        building_only_list=train_list,
     )
     val_ds = RescueNetDataset(
         root_dir=data_cfg['data_root'],
         mode='val',
-        joint_transform=get_val_transform(train_cfg['train_h'], train_cfg['train_w']),
+        joint_transform=joint_val,
         label_mapping=label_mapping,
+        building_only_list=val_list,
     )
 
     print(f'Train: {len(train_ds)} samples | Val: {len(val_ds)} samples')
@@ -383,6 +422,12 @@ def main():
         momentum=train_cfg['momentum'],
         weight_decay=train_cfg['weight_decay'],
     )
+    scheduler = None
+    if train_cfg.get('scheduler') == 'ReduceLROnPlateau':
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer, mode='max', factor=0.5, patience=5
+        )
+        print('LR scheduler: ReduceLROnPlateau on val mIoU')
 
     use_amp = train_cfg.get('use_amp', False)
     scaler  = GradScaler('cuda') if use_amp else None
@@ -411,6 +456,8 @@ def main():
         _, val_miou, iou_cls = val_epoch(
             val_loader, model, criterion, epoch, cfg, writer
         )
+        if scheduler is not None:
+            scheduler.step(val_miou)
 
         # Best model: by important mIoU (sadece bina+yol) veya full mIoU
         important_ids = data_cfg.get('important_class_ids')
@@ -438,12 +485,13 @@ def main():
         if best_metric > best_miou:
             best_miou  = best_metric
             no_improve = 0
-            save_checkpoint(
-                {'epoch': epoch + 1, 'state_dict': raw_model.state_dict(),
-                 'optimizer': optimizer.state_dict(), 'best_miou': best_miou},
-                train_cfg['save_path'],
-                'best.pth'
-            )
+            ckpt_state = {
+                'epoch': epoch + 1, 'state_dict': raw_model.state_dict(),
+                'optimizer': optimizer.state_dict(), 'best_miou': best_miou,
+            }
+            if data_cfg['num_classes'] >= 3:
+                ckpt_state['best_building_heavy_iou'] = float(iou_cls[2])
+            save_checkpoint(ckpt_state, train_cfg['save_path'], 'best.pth')
             print(f'★ New best {metric_name}: {best_miou:.4f} — checkpoint saved.')
         else:
             no_improve += 1

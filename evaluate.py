@@ -20,7 +20,7 @@ from PIL import Image
 
 from data.dataset import RescueNetDataset, LABEL_MAP_11_TO_5, LABEL_MAP_11_TO_3
 from models.unet import AttU_Net
-from transforms import get_val_transform
+from transforms import get_val_transform, get_val_transform_crop
 from utils.metrics import intersectionAndUnionGPU, compute_iou_per_class, print_iou_table
 
 
@@ -79,10 +79,16 @@ def evaluate(args, cfg):
         label_mapping = LABEL_MAP_11_TO_5
     else:
         label_mapping = None
+    crop_size = test_cfg.get('test_crop_size') or train_cfg.get('train_crop_size')
+    if crop_size is not None:
+        joint_transform = get_val_transform_crop(crop_size)
+        print(f'Test transform: center-crop/pad to {crop_size}x{crop_size}')
+    else:
+        joint_transform = get_val_transform(test_cfg['test_h'], test_cfg['test_w'])
     test_ds = RescueNetDataset(
         root_dir=data_cfg['data_root'],
         mode='test',
-        joint_transform=get_val_transform(test_cfg['test_h'], test_cfg['test_w']),
+        joint_transform=joint_transform,
         label_mapping=label_mapping,
     )
     test_loader = DataLoader(

@@ -70,6 +70,96 @@ class RandomRotation:
         return img, mask
 
 
+class RandomRotation90:
+    """Random rotation by 0, 90, 180, or 270 degrees. Applied to both image and mask."""
+    def __call__(self, img, mask):
+        angle = random.choice([0, 90, 180, 270])
+        img  = TF.rotate(img,  angle, interpolation=T.InterpolationMode.BILINEAR, fill=0)
+        mask = TF.rotate(mask, angle, interpolation=T.InterpolationMode.NEAREST,  fill=255)
+        return img, mask
+
+
+class SmartRandomCrop:
+    """Random crop of crop_size x crop_size. Prefer centers on building-heavy (class 2), then building-light (class 1).
+    Expects mask already in 3-class (0=bg, 1=building-light, 2=building-heavy). Pads if image smaller than crop_size.
+    """
+    def __init__(self, crop_size, prob_heavy=0.5, prob_light=0.3):
+        self.crop_size = crop_size
+        self.prob_heavy = prob_heavy
+        self.prob_light = prob_light
+
+    def __call__(self, img, mask):
+        img_np = np.array(img)
+        mask_np = np.array(mask, dtype=np.int64)
+        H, W = mask_np.shape[:2]
+
+        if H < self.crop_size or W < self.crop_size:
+            pad_h = max(0, self.crop_size - H)
+            pad_w = max(0, self.crop_size - W)
+            img_np = np.pad(
+                img_np, ((0, pad_h), (0, pad_w), (0, 0)),
+                mode='reflect'
+            )
+            mask_np = np.pad(
+                mask_np, ((0, pad_h), (0, pad_w)),
+                constant_values=255
+            )
+            H, W = mask_np.shape[0], mask_np.shape[1]
+
+        heavy_ys, heavy_xs = np.where(mask_np == 2)
+        light_ys, light_xs = np.where(mask_np == 1)
+        r = random.random()
+        if r < self.prob_heavy and len(heavy_ys) > 0:
+            idx = random.randint(0, len(heavy_ys) - 1)
+            center_y, center_x = int(heavy_ys[idx]), int(heavy_xs[idx])
+        elif r < self.prob_heavy + self.prob_light and len(light_ys) > 0:
+            idx = random.randint(0, len(light_ys) - 1)
+            center_y, center_x = int(light_ys[idx]), int(light_xs[idx])
+        else:
+            center_y = random.randint(0, H - 1) if H > 0 else 0
+            center_x = random.randint(0, W - 1) if W > 0 else 0
+
+        top = center_y - self.crop_size // 2
+        left = center_x - self.crop_size // 2
+        top = max(0, min(top, H - self.crop_size))
+        left = max(0, min(left, W - self.crop_size))
+        img_crop = img_np[top:top + self.crop_size, left:left + self.crop_size]
+        mask_crop = mask_np[top:top + self.crop_size, left:left + self.crop_size]
+        return Image.fromarray(img_crop), Image.fromarray(mask_crop.astype(np.uint8))
+
+
+class CenterCropOrResize:
+    """For validation: center crop of crop_size, or pad then center crop if image smaller than crop_size."""
+    def __init__(self, crop_size):
+        self.crop_size = crop_size
+
+    def __call__(self, img, mask):
+        img_np = np.array(img)
+        mask_np = np.array(mask, dtype=np.int64)
+        H, W = mask_np.shape[0], mask_np.shape[1]
+
+        if H < self.crop_size or W < self.crop_size:
+            pad_h = max(0, self.crop_size - H)
+            pad_w = max(0, self.crop_size - W)
+            img_np = np.pad(
+                img_np, ((0, pad_h), (0, pad_w), (0, 0)),
+                mode='reflect'
+            )
+            mask_np = np.pad(
+                mask_np, ((0, pad_h), (0, pad_w)),
+                constant_values=255
+            )
+            H, W = mask_np.shape[0], mask_np.shape[1]
+
+        top = (H - self.crop_size) // 2
+        left = (W - self.crop_size) // 2
+        top = max(0, min(top, H - self.crop_size))
+        left = max(0, min(left, W - self.crop_size))
+        img_crop = img_np[top:top + self.crop_size, left:left + self.crop_size]
+        mask_crop = mask_np[top:top + self.crop_size, left:left + self.crop_size]
+        return Image.fromarray(img_crop), Image.fromarray(mask_crop.astype(np.uint8))
+
+
 class RandomScale:
     """Random scale crop: zoom in/out then resize back to original size."""
     def __init__(self, scale_min=0.5, scale_max=2.0, base_size=512):
@@ -149,5 +239,25 @@ def get_train_transform(height=512, width=512):
 def get_val_transform(height=512, width=512):
     return Compose([
         Resize(height, width),
+        ToTensorAndNormalize(),
+    ])
+
+
+def get_train_transform_crop(crop_size, prob_heavy=0.5, prob_light=0.3):
+    """Crop-based train transform: smart crop then light aug only (H flip, V flip, 90° rot, mild color)."""
+    return Compose([
+        SmartRandomCrop(crop_size, prob_heavy=prob_heavy, prob_light=prob_light),
+        RandomHorizontalFlip(p=0.5),
+        RandomVerticalFlip(p=0.5),
+        RandomRotation90(),
+        ColorJitter(brightness=0.2, contrast=0.2, saturation=0.1, hue=0.05),
+        ToTensorAndNormalize(),
+    ])
+
+
+def get_val_transform_crop(crop_size):
+    """Crop-based val transform: center crop (pad if smaller) then ToTensor."""
+    return Compose([
+        CenterCropOrResize(crop_size),
         ToTensorAndNormalize(),
     ])

@@ -1,0 +1,44 @@
+# 3-class, 1024x1024 (daha az resize kaybı). VRAM yeterse batch_size 2 kullan.
+
+DATA:
+  data_root: /kaggle/input/rescuenet
+  num_classes: 3
+  use_reduced_3class: true
+  class_weights: [0.4, 1.3, 1.5]
+  important_class_ids: [1, 2]
+  loss_only_on_important: true
+  class_names: [Others, Building-Light, Building-Heavy]
+  color_map: [[0,0,0], [180,180,120], [255,0,0]]
+
+TRAIN:
+  arch: pspnet_resnet101
+  train_h: 1024
+  train_w: 1024
+  scale_min: 0.5
+  scale_max: 2.0
+  rotate_min: -10
+  rotate_max: 10
+  ignore_label: 255
+  workers: 4
+  batch_size: 2
+  batch_size_val: 1
+  use_amp: true
+  base_lr: 0.001
+  momentum: 0.9
+  weight_decay: 0.00001
+  epochs: 120
+  start_epoch: 0
+  power: 0.9
+  early_stopping_patience: 40
+  print_freq: 50
+  save_freq: 1
+  save_path: /kaggle/working/checkpoints_pspnet_3class_1024
+  resume: ""
+  use_dice_ce: true
+  dice_weight: 0.6
+
+TEST:
+  test_h: 1024
+  test_w: 1024
+  model_path: ""
+  save_folder: /kaggle/working/predictions_pspnet_3class_1024

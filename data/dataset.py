@@ -77,10 +77,12 @@ class RescueNetDataset(data.Dataset):
                  joint_transform=None,
                  image_transform=None,
                  mask_transform=None,
-                 label_mapping=None):
+                 label_mapping=None,
+                 building_only_list=None):
         """
         label_mapping: optional list of length 11; mapping[old_id] = new_id for original classes 0..10.
-                       If provided, mask pixels are remapped (255 stays 255). Use LABEL_MAP_11_TO_5 for 5-class.
+        building_only_list: optional path to .txt with one image path per line; only those images are used.
+                            Use scripts/build_building_list.py to generate.
         """
         assert mode in self.FOLDER_MAP, f"mode must be one of {list(self.FOLDER_MAP)}"
         self.root_dir = root_dir
@@ -89,6 +91,7 @@ class RescueNetDataset(data.Dataset):
         self.image_transform = image_transform
         self.mask_transform = mask_transform
         self.label_mapping = label_mapping  # list of 11 elements, or None
+        self.building_only_list = building_only_list
         if label_mapping is not None:
             assert len(label_mapping) == 11, "label_mapping must have 11 elements (for original classes 0..10)"
 
@@ -106,6 +109,15 @@ class RescueNetDataset(data.Dataset):
         assert len(self.images) == len(self.labels), (
             f"Mismatch: {len(self.images)} images vs {len(self.labels)} labels in {mode} set."
         )
+
+        # Opsiyonel: sadece bina etiketi olan görüntüler (building_only_list = .txt dosya yolu)
+        if building_only_list is not None and os.path.isfile(building_only_list):
+            with open(building_only_list, 'r') as f:
+                allowed = set(line.strip() for line in f if line.strip())
+            indices = [i for i in range(len(self.images)) if self.images[i] in allowed]
+            self.images = [self.images[i] for i in indices]
+            self.labels = [self.labels[i] for i in indices]
+            assert len(self.images) > 0, f"building_only_list ile eşleşen görüntü kalmadı: {building_only_list}"
 
     def __len__(self):
         return len(self.images)
@@ -134,6 +146,33 @@ class RescueNetDataset(data.Dataset):
 
     def get_image_path(self, index):
         return self.images[index]
+
+
+def build_building_list(root_dir, mode, out_path):
+    """Bina pikseli (orijinal sınıf 2,3,4,5) içeren görüntülerin path'lerini out_path'e yazar.
+    Returns: kaç görüntü listelendi.
+    """
+    img_folder, lbl_folder = RescueNetDataset.FOLDER_MAP[mode]
+    images = _get_files(
+        os.path.join(root_dir, img_folder),
+        extension_filter='.jpg'
+    )
+    labels = _get_files(
+        os.path.join(root_dir, lbl_folder),
+        name_filter='lab',
+        extension_filter='.png'
+    )
+    assert len(images) == len(labels), f"Mismatch {len(images)} vs {len(labels)}"
+    building_paths = []
+    for i in range(len(images)):
+        arr = np.array(Image.open(labels[i]))
+        if np.any((arr >= 2) & (arr <= 5)):
+            building_paths.append(images[i])
+    os.makedirs(os.path.dirname(out_path) or '.', exist_ok=True)
+    with open(out_path, 'w') as f:
+        for p in building_paths:
+            f.write(p + '\n')
+    return len(building_paths)
 
 
 def compute_class_weights(dataset, num_classes=11, c=1.02, max_samples=500):

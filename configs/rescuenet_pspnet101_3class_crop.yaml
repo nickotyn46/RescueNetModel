@@ -1,0 +1,48 @@
+# RescueNet 3-class crop-based pipeline (no full resize)
+# Building damage only: background (0), building-light (1), building-heavy (2)
+# Random crops from original resolution; smart crop prefers building/heavy.
+
+DATA:
+  data_root: /kaggle/input/rescuenet
+  num_classes: 3
+  use_reduced_3class: true
+  class_weights: [0.4, 1.2, 1.5]
+  important_class_ids: [1, 2]
+  loss_only_on_important: true
+  class_names:
+    - background
+    - building-light
+    - building-heavy
+  color_map:
+    - [0, 0, 0]
+    - [180, 180, 120]
+    - [255, 0, 0]
+
+TRAIN:
+  arch: pspnet_resnet101
+  train_crop_size: 896   # use 768 if OOM
+  crop_prob_heavy: 0.5
+  crop_prob_light: 0.3
+  ignore_label: 255
+  workers: 4
+  batch_size: 2
+  batch_size_val: 1
+  use_amp: true
+  base_lr: 0.0001        # 5e-5 if unstable
+  momentum: 0.9
+  weight_decay: 0.00001
+  epochs: 50
+  start_epoch: 0
+  early_stopping_patience: 10
+  print_freq: 50
+  save_freq: 1
+  save_path: /kaggle/working/checkpoints_pspnet_3class_crop
+  resume: ""
+  scheduler: ReduceLROnPlateau
+  use_dice_ce: true
+  dice_weight: 0.5
+
+TEST:
+  test_crop_size: 896
+  model_path: ""
+  save_folder: /kaggle/working/predictions_pspnet_3class_crop
