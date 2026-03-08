@@ -7,8 +7,8 @@ DATA:
   num_classes: 3
   use_reduced_3class: true
   class_weights: [0.4, 1.2, 1.5]
-  important_class_ids: [1, 2]
-  loss_only_on_important: true
+  important_class_ids: [1, 2]   # best checkpoint & reporting by bina mIoU / building-heavy
+  loss_only_on_important: false # true = gradient sadece 1,2 (background IoU 0 kalır); false = tüm sınıflar
   class_names:
     - background
     - building-light
